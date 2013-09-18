@@ -1,5 +1,7 @@
 module Squash.Match (
-                   )
+  Match, matchPairing, matchDuration, matchGames,
+  score, interleave, Pairing(Pairing), Game, GameResult,
+  unscheduled, forPairing)
 where
 
 import Data.Time.LocalTime
