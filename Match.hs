@@ -1,15 +1,16 @@
 module Squash.Match (
-  Match, matchPairing, matchDuration, matchGames,
+  Match(Match), matchPairing, matchDuration, matchGames,
   score, interleave, Pairing(Pairing), Game, GameResult,
-  unscheduled, forPairing)
+  unscheduled, forPairing, hasPlayer)
 where
 
 import Data.Time.LocalTime
+import Squash.Utils
 import Squash.Player
 
 data Match = Match {
   matchPairing :: Pairing,
-  matchDuration :: Maybe ( LocalTime, LocalTime),
+  matchDuration :: Maybe TimeInterval,
   matchGames ::  [Game]
 }
 
@@ -32,6 +33,11 @@ forPairing :: Pairing -> Match -> Bool
 forPairing pairing Match { matchPairing = pairing'}
     | pairing == pairing' = True
     | otherwise           = False
+
+hasPlayer :: Player -> Match -> Bool
+hasPlayer player Match { matchPairing = Pairing (p1,p2)}
+    | (p1 == player) || (p2 == player) = True
+    | otherwise                        = False
 
 unscheduled :: Match -> Bool
 unscheduled Match { matchDuration = Nothing } = True

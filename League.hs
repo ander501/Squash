@@ -1,5 +1,6 @@
-module Squash.League
-where
+module Squash.League where
+
+import Squash.Utils
 import Squash.Player
 import Squash.Match
 import Control.Monad.Reader
@@ -11,33 +12,31 @@ import Data.Time.LocalTime
 import Data.List.Zipper (Zipper)
 import qualified Data.List.Zipper as Zipper
 
-data LeagueError = LeagueException | NoOfferFound | NoMatchFound | LeagueError String
+data LeagueError = LeagueException
+                 | NoOfferFound
+                 | NoMatchFound
+                 | TimeConflict
+                 | LeagueError String
 
 instance Error LeagueError where
   noMsg = LeagueException
   strMsg s = LeagueError s
 
-type League m a = ReaderT ErrorT LeagueError (StateT LeagueState m) a
+type League m a = PlayerReader (ErrorT LeagueError (StateT LeagueState m)) a
 
 data LeagueState = LeagueState {
   leagueMatches :: [Match],
-  leagueOffers  :: [OfferTime]
+  leagueOffers  :: [Offer]
 }
 
-data OfferTime = OfferTime {
+data Offer = Offer {
   offerPlayer :: Player,
-  offerStart  :: LocalTime,
-  offerEnd    :: LocalTime
+  offerInterval :: TimeInterval
   }
 
-possibleTime :: LocalTime -> LocalTime -> OfferTime -> Bool
-possibleTime startTime endTime OfferTime {
-  offerStart = offerStartTime,
-  offerEnd = offerEndTime }
-  | (offerStartTime <= startTime) && (startTime <= offerEndTime)
-    && (offerStartTime <= endTime) && (endTime <= offerEndTime)
-    && (startTime < endTime) = True
-  | otherwise = False
+possibleTime :: TimeInterval -> Offer -> Bool
+possibleTime interval Offer { offerInterval = offerredInterval }
+  = interval `containedIn` offerredInterval
 
 type PlayerScores = Map Int
 
@@ -49,8 +48,26 @@ standings = do
   matches <- leagueMatches `liftM` get
   return $ Map.assocs $ foldr collect Map.empty $ playerTotals $ matches
 
-acceptOffer :: (Monad m) => LocalTime -> LocalTime -> Player -> Player -> League m ()
-acceptOffer startTime endTime offeringPlayer acceptingPlayer
+makeOffer :: (Monad m) => TimeInterval -> Player -> League m ()
+makeOffer interval offeringPlayer
+  = do
+      offers <- leagueOffers `liftM` get
+      matches <- leagueMatches `liftM` get
+      if (null $ filter isConflictingP matches)
+        then put LeagueState {
+           leagueOffers = (Offer {
+                              offerPlayer = offeringPlayer,
+                              offerInterval = interval} : offers ),
+           leagueMatches = matches}
+        else throwError TimeConflict
+  where
+    isConflictingP :: Match -> Bool
+    isConflictingP match@(Match { matchPairing = Pairing (p1, p2), matchDuration = (Just scheduledInterval)})
+          = (p1 == offeringPlayer || p2 == offeringPlayer) && (interval `conflictsWith` scheduledInterval)
+    isConflictingP _ = False
+
+acceptOffer :: (Monad m) => TimeInterval -> Player -> Player -> League m ()
+acceptOffer interval offeringPlayer acceptingPlayer
   = do
       offers <- leagueOffers `liftM` get
       matches <- leagueMatches `liftM` get
@@ -64,7 +81,7 @@ acceptOffer startTime endTime offeringPlayer acceptingPlayer
                else return $ head tailMatches
       put LeagueState {
         leagueOffers = frontOffers ++ tail tailOffers,
-        leagueMatches = frontMatches ++ [match { matchDuration = Just (startTime, endTime) }] ++ tail tailMatches
+        leagueMatches = frontMatches ++ [match { matchDuration = Just interval}] ++ tail tailMatches
         }
-  where matchingOfferP offer@(OfferTime { offerPlayer = player}) = (player == offeringPlayer) && (possibleTime startTime endTime offer)
+  where matchingOfferP offer@(Offer { offerPlayer = player}) = (player == offeringPlayer) && (possibleTime interval offer)
         matchingMatchP match = (unscheduled match) && (forPairing (Pairing (offeringPlayer, acceptingPlayer)) match)
